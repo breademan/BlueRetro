@@ -48,7 +48,9 @@
 
 #define DESC_CTRL     0x000F06FE
 #define DESC_CTRL_ALT 0x003FFFFF
-#define DESC_VMU      0x7E7E3F40
+#define DESC_VMU_MEMORY      0x7E7E3F40
+#define DESC_VMU_SCREEN      0x00051000
+#define DESC_VMU_TIMER      0x000F4100
 #define DESC_RUMBLE   0x01010000
 #define DESC_MOUSE    0x000E0700
 #define DESC_KB       0x01020080
@@ -107,12 +109,10 @@ static const uint8_t ctrl_area_dir_name[] = {
     0x6C, 0x6C, 0x6F, 0x72, 0x20, 0x20, 0x72, 0x65, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
 };
 
-#if 0
 static const uint8_t vmu_area_dir_name[] = {
     0x69, 0x56, 0x00, 0xFF, 0x6C, 0x61, 0x75, 0x73, 0x6D, 0x65, 0x4D, 0x20, 0x20, 0x79, 0x72, 0x6F,
     0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
 };
-#endif
 
 static const uint8_t rumble_area_dir_name[] = {
     0x75, 0x50, 0x00, 0xFF, 0x50, 0x20, 0x75, 0x72, 0x20, 0x75, 0x72, 0x75, 0x6B, 0x63, 0x61, 0x50,
@@ -140,6 +140,12 @@ static const uint8_t dc_mouse_axes_idx[ADAPTER_MAX_AXES] =
 {
 /*  AXIS_LX, AXIS_LY, AXIS_RX, AXIS_RY, TRIG_L, TRIG_R  */
     2,       3,       1,       0,       5,      4
+};
+
+static const uint8_t vmu_media_info[] = {
+    0x00, 0x00, 0x00, 0xff, 0x00, 0xfe, 0x00, 0xff, 0x00, 0xfd, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0d,
+    0x00, 0x1f, 0x00, 0xc8, 0x00, 0x80, 0x00, 0x00,
+
 };
 
 #else
@@ -493,6 +499,9 @@ maple_end:
                         if (config.out_cfg[port].acc_mode & ACC_RUMBLE) {
                             pkt.src |= ADDR_RUMBLE;
                         }
+                        if (config.out_cfg[port].acc_mode & ACC_MEM) {
+                            pkt.src |= ADDR_MEM;
+                        }
                         pkt.dst = dst;
                         switch (cmd) {
                             case CMD_INFO_REQ:
@@ -592,6 +601,57 @@ maple_end:
                             default:
                                 ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
                                 break;
+                        }
+                        break;
+                    case ADDR_MEM:
+                        pkt.src = src;
+                        pkt.dst = dst;
+                        switch(cmd) {
+                            case CMD_INFO_REQ:
+                                pkt.len = 28;
+                                pkt.cmd = CMD_INFO_RSP;
+                                pkt.data32[0] = ID_VMU_MEM | ID_VMU_LCD | ID_VMU_CLK;
+                                pkt.data32[1] = DESC_VMU_MEMORY;
+                                pkt.data32[2] = DESC_VMU_SCREEN;
+                                pkt.data32[3] = DESC_VMU_TIMER;
+                                memcpy((void *)&pkt.data32[4], vmu_area_dir_name, sizeof(vmu_area_dir_name));
+                                memcpy((void *)&pkt.data32[12], brand, sizeof(brand));
+                                pkt.data32[27] = PWR_VMU;
+                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                break;
+                            case CMD_EXT_INFO_REQ: //TODO unimplemented
+                            case CMD_GET_CONDITION:
+                            case CMD_MEM_INFO_REQ://TODO untested
+                                pkt.len = 0x07;
+                                pkt.cmd = CMD_DATA_TX;
+                                pkt.data32[0] = ID_VMU_MEM;
+                                //media information: 24 bytes
+                                memcpy((void *)&pkt.data32[1], vmu_media_info, sizeof(vmu_media_info));
+                                //TODO parse what it's asking for and put it in the packet
+                                //For now, try sending just a static set of data.
+                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                break;
+                            case CMD_BLOCK_READ://TODO unimplemented
+                                pkt.len = 0x03;
+                                pkt.cmd = CMD_DATA_TX;
+                                pkt.data32[0] = ID_RUMBLE;
+                                pkt.data32[1] = 0;
+                                pkt.data32[2] = rumble_max;
+                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                break;
+                            case CMD_BLOCK_WRITE://TODO unimplemented
+                                pkt.len = 0x00;
+                                pkt.cmd = CMD_ACK;
+                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                if (!bad_frame) {
+                                    rumble_max = pkt.data32[2];
+                                }
+                                break;
+                            default:
+                                ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);
+                                break;
+
+
                         }
                         break;
                 }

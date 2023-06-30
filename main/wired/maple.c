@@ -657,7 +657,7 @@ maple_end:
                                     block_no = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     //data will be written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
-                                    mc_write((block_no*512)+(128*phase),&pkt.data32[2],128) = pkt.data32[2];
+                                    mc_write((block_no*512)+(128*phase),&pkt.data32[2],128);
                                 }
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;

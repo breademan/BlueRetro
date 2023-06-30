@@ -10,6 +10,7 @@
 #include "tools/util.h"
 #include "adapter/adapter.h"
 #include "adapter/config.h"
+#include "adapter/memory_card.h"
 #include "adapter/wired/dc.h"
 #include "system/core0_stall.h"
 #include "system/delay.h"
@@ -63,6 +64,10 @@
 
 #define TIMEOUT 8
 #define TIMEOUT_ABORT 100
+
+#define VMU_BLOCK_SIZE 512
+#define VMU_WRITE_ACCESSES 4
+#define VMU_READ_ACCESSES 1
 
 #define wait_100ns() asm("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n");
 #define maple_fix_byte(s, a, b) (s ? ((a << s) | (b >> (8 - s))) : b)
@@ -145,7 +150,6 @@ static const uint8_t dc_mouse_axes_idx[ADAPTER_MAX_AXES] =
 static const uint8_t vmu_media_info[] = {
     0x00, 0x00, 0x00, 0xff, 0x00, 0xfe, 0x00, 0xff, 0x00, 0xfd, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0d,
     0x00, 0x1f, 0x00, 0xc8, 0x00, 0x80, 0x00, 0x00,
-
 };
 
 #else
@@ -334,6 +338,8 @@ static unsigned maple_rx(unsigned cause) {
     uint32_t bad_frame;
     uint8_t len, cmd, src, dst, crc = 0;
     uint32_t maple1;
+    uint8_t phase;
+    uint8_t block_no;
 
     if (maple0) {
         core0_stall_start();
@@ -621,31 +627,39 @@ maple_end:
                                 break;
                             case CMD_EXT_INFO_REQ: //TODO unimplemented
                             case CMD_GET_CONDITION:
-                            case CMD_MEM_INFO_REQ://TODO untested
+                            case CMD_MEM_INFO_REQ:
                                 pkt.len = 0x07;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = ID_VMU_MEM;
                                 //media information: 24 bytes
                                 memcpy((void *)&pkt.data32[1], vmu_media_info, sizeof(vmu_media_info));
-                                //TODO parse what it's asking for and put it in the packet
-                                //For now, try sending just a static set of data.
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
-                            case CMD_BLOCK_READ://TODO unimplemented
-                                pkt.len = 0x03;
+                            case CMD_BLOCK_READ://TODO untested
+                                pkt.len = 128+2;
                                 pkt.cmd = CMD_DATA_TX;
-                                pkt.data32[0] = ID_RUMBLE;
-                                pkt.data32[1] = 0;
-                                pkt.data32[2] = rumble_max;
+                                pkt.data32[0] = ID_VMU_MEM;
+                                //pkt.data32[1] // This should be the same as what the host sent, though this also applies for [0].
+                                phase = (uint8_t) ((pkt.data32[1] >> 8) & 0x00FF);
+                                if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);break;}
+                                block_no = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
+                                mc_read(block_no*512, &pkt.data32[2],512);
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
-                            case CMD_BLOCK_WRITE://TODO unimplemented
+                            case CMD_BLOCK_WRITE://TODO untested
+                                //Verify my assumption that write accesses is actually 4
+                                if(pkt.len!=32+2){ets_printf("Unexpected Block Write packet length: 0x%02X, expected 0x22\n", pkt.len);break;}
                                 pkt.len = 0x00;
                                 pkt.cmd = CMD_ACK;
-                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
-                                if (!bad_frame) {
-                                    rumble_max = pkt.data32[2];
+                                //Don't actually write if function description is ID_VMU_LCD or ID_VMU_CLK
+                                if ((!bad_frame) && pkt.data32[0]!=ID_VMU_LCD && pkt.data32[0]!=ID_VMU_CLK) { 
+                                    phase = (uint8_t) ((pkt.data32[1] >> 8) & 0x00FF);
+                                    block_no = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
+                                    //data will be written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
+                                    //but if we read data back in the same order it should be OK until I make an unscramble function.
+                                    mc_write((block_no*512)+(128*phase),&pkt.data32[2],128) = pkt.data32[2];
                                 }
+                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             default:
                                 ets_printf("%02X: Unk cmd: 0x%02X\n", dst, cmd);

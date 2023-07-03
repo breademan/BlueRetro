@@ -27,7 +27,7 @@ static esp_timer_handle_t mc_timer_hdl = NULL;
 static int32_t mc_block_state = 0;
 
 static int32_t mc_restore(void);
-static int32_t mc_store(void);
+static int32_t mc_store(char *filename);
 static inline void mc_store_cb(void *arg);
 
 static void mc_start_update_timer(uint64_t timeout_us) {
@@ -39,16 +39,16 @@ static void mc_start_update_timer(uint64_t timeout_us) {
     }
 }
 
-static int32_t mc_restore(void) {
+static int32_t mc_restore(char *filename) {
     struct stat st;
     int32_t ret = -1;
 
-    if (stat(MEMORY_CARD_FILE, &st) != 0) {
+    if (stat(filename, &st) != 0) {
         printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
-        ret = mc_store();
+        ret = mc_store(filename);
     }
     else {
-        FILE *file = fopen(MEMORY_CARD_FILE, "rb");
+        FILE *file = fopen(filename, "rb");
         if (file == NULL) {
             printf("# %s: failed to open file for reading\n", __FUNCTION__);
         }
@@ -71,10 +71,11 @@ static int32_t mc_restore(void) {
     return ret;
 }
 
-static int32_t mc_store(void) {
+//Writes 
+static int32_t mc_store(char *filename) {
     int32_t ret = -1;
 
-    FILE *file = fopen(MEMORY_CARD_FILE, "wb");
+    FILE *file = fopen(filename, "wb");
     if (file == NULL) {
         printf("# %s: failed to open file for writing\n", __FUNCTION__);
     }
@@ -94,10 +95,10 @@ static int32_t mc_store(void) {
     return ret;
 }
 
-static int32_t mc_store_spread(void) {
+static int32_t mc_store_spread(char *filename) {
     int32_t ret = -1;
 
-    FILE *file = fopen(MEMORY_CARD_FILE, "r+b");
+    FILE *file = fopen(filename, "r+b");
     if (file == NULL) {
         printf("# %s: failed to open file for writing\n", __FUNCTION__);
     }
@@ -128,7 +129,7 @@ static int32_t mc_store_spread(void) {
 }
 
 static inline void mc_store_cb(void *arg) {
-    (void)mc_store_spread();
+    (void)mc_store_spread(MEMORY_CARD_FILE);
 }
 
 int32_t mc_init(void) {
@@ -151,7 +152,7 @@ int32_t mc_init(void) {
 
     esp_timer_create(&mc_timer_args, &mc_timer_hdl);
 
-    ret = mc_restore();
+    ret = mc_restore(MEMORY_CARD_FILE);
 
     return ret;
 
@@ -161,6 +162,10 @@ exit:
 
 void mc_storage_update(void) {
     mc_start_update_timer(1000000);
+}
+
+void mc_storage_instant_writeback(void) {
+    mc_start_update_timer(1);
 }
 
 /* Assume r/w size will never cross blocks boundary */

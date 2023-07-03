@@ -14,6 +14,11 @@
 #define MEMORY_CARD_FILE "/fs/mc.bin"
 #define BITSTREAM_FILE "/fs/bitstream.bit"
 
+#define VMU_0_FILE "/fs/vmu0.bin"
+#define VMU_1_FILE "/fs/vmu1.bin"
+#define VMU_2_FILE "/fs/vmu2.bin"
+#define VMU_3_FILE "/fs/vmu3.bin"
+
 int32_t fs_init(void);
 void fs_reset(void);
 

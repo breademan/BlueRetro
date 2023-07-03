@@ -251,6 +251,7 @@ static void bt_fb_task(void *param) {
                     break;
                 case FB_TYPE_MEM_WRITEBACK:
                     mc_storage_instant_writeback();
+                    break;
                 case FB_TYPE_PLAYER_LED:
                     if (device) {
                         bt_hid_init(device);

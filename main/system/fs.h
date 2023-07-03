@@ -11,7 +11,7 @@
 #define LE_LINK_KEYS_FILE "/fs/le_linkkeys.bin"
 #define BDADDR_FILE "/fs/bdaddr.bin"
 #define CONFIG_FILE "/fs/config.bin"
-#define MEMORY_CARD_FILE "/fs/mc.bin"
+#define N64_MEMORY_CARD_FILE "/fs/mc.bin"
 #define BITSTREAM_FILE "/fs/bitstream.bit"
 
 #define VMU_0_FILE "/fs/vmu0.bin"

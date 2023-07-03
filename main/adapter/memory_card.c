@@ -18,15 +18,21 @@
 #define MC_BUFFER_BLOCK_SIZE (4 * 1024)
 #define MC_BUFFER_BLOCK_CNT (MC_BUFFER_SIZE / MC_BUFFER_BLOCK_SIZE)
 
+#define MC_MAX_FILE_CNT (4)
+
 /* Related to bare metal hack, something goes writing there. */
 /* Workaround: Remove region from heap pool until I figure it out */
 SOC_RESERVE_MEMORY_REGION(0x3FFE7D98, 0x3FFE7E28, bad_region);
 
 static uint8_t *mc_buffer[MC_BUFFER_BLOCK_CNT] = {0};
 static esp_timer_handle_t mc_timer_hdl = NULL;
-static int32_t mc_block_state = 0;
+static int32_t mc_block_state = 0; // Holds which cache line is not yet written back to flash
+static uint8_t num_files = 1;
+static char * filename_list[MC_MAX_FILE_CNT]; // List of files which the memory card contains
+static uint8_t vmu_number[MC_BUFFER_BLOCK_CNT]; // Holds which cache line is mapped to which file; index is the cache line, value is the index in filename_list
+static uint_8t vmu_block[MC_BUFFER_BLOCK_CONT]; // Holds which cache line is mapped to which block of the VMU
 
-static int32_t mc_restore(void);
+static int32_t mc_restore(char *filename);
 static int32_t mc_store(char *filename);
 static inline void mc_store_cb(void *arg);
 
@@ -39,7 +45,7 @@ static void mc_start_update_timer(uint64_t timeout_us) {
     }
 }
 
-static int32_t mc_restore(char *filename) {
+static int32_t mc_restore(char * filename) {
     struct stat st;
     int32_t ret = -1;
 
@@ -95,7 +101,7 @@ static int32_t mc_store(char *filename) {
     return ret;
 }
 
-static int32_t mc_store_spread(char *filename) {
+static int32_t mc_store_spread() {
     int32_t ret = -1;
 
     FILE *file = fopen(filename, "r+b");
@@ -129,7 +135,7 @@ static int32_t mc_store_spread(char *filename) {
 }
 
 static inline void mc_store_cb(void *arg) {
-    (void)mc_store_spread(MEMORY_CARD_FILE);
+    (void)mc_store_spread();
 }
 
 int32_t mc_init(void) {
@@ -152,7 +158,22 @@ int32_t mc_init(void) {
 
     esp_timer_create(&mc_timer_args, &mc_timer_hdl);
 
-    ret = mc_restore(MEMORY_CARD_FILE);
+    if(wired_adapter.system_id==DC) {
+        num_files=4;
+        filename_list[0]=VMU_0_FILE;
+        filename_list[1]=VMU_1_FILE;
+        filename_list[2]=VMU_2_FILE;
+        filename_list[3]=VMU_3_FILE;
+    }
+    else {
+        num_files=1;
+        filename_list[0]=N64_MEMORY_CARD_FILE;
+    }
+
+    for (uint_8t i = 0; i < num_files;i++;){
+    ret = mc_restore(filename_list[i]);
+    if(ret==-1) goto exit;
+    }
 
     return ret;
 

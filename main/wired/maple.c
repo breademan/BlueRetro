@@ -643,7 +643,7 @@ maple_end:
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                mc_read(block_no*512, (void *) &pkt.data32[2],512);
+                                mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0);
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_BLOCK_WRITE:
@@ -655,7 +655,7 @@ maple_end:
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
                                     //data might be written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
-                                    mc_write((block_no*512)+(128*phase),(void *) &pkt.data32[2],128);
+                                    mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0);
                                 }
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;

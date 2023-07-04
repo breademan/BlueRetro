@@ -250,7 +250,7 @@ static void bt_fb_task(void *param) {
                     mc_storage_update();
                     break;
                 case FB_TYPE_MEM_WRITEBACK:
-                    mc_storage_instant_writeback();
+                    mc_storage_update_instant();
                     break;
                 case FB_TYPE_PLAYER_LED:
                     if (device) {

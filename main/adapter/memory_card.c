@@ -13,7 +13,7 @@
 #include "sdkconfig.h"
 #include "system/fs.h"
 #include "memory_card.h"
-#include <esp32/rom/ets_sys.h>
+#include "system/delay.h"
 
 #define MC_BUFFER_SIZE (128 * 1024)
 #define MC_BUFFER_BLOCK_SIZE (4 * 1024)
@@ -41,7 +41,7 @@ static uint8_t mc_fetch_card_num = 0;
 static uint32_t mc_fetch_addr = NULL;
 
 
-static int32_t mc_restore(char *filename);
+static int32_t mc_restore();
 static int32_t mc_store(char *filename);
 static inline void mc_store_cb(void *arg);
 
@@ -58,7 +58,7 @@ static void mc_start_update_timer(uint64_t timeout_us) {
 static int32_t mc_restore() {
     struct stat st;
     int32_t ret = -1;
-    for (uint8_t i = 0; i<num_files;i++;){
+    for (uint8_t i = 0; i<num_files;i++){
         if (stat(filename_list[i], &st) != 0) {
             printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
             ret = mc_store(filename_list[i]);
@@ -116,38 +116,39 @@ static int32_t mc_store(char *filename) {
 
 static int32_t mc_store_spread() {
     int32_t ret = -1;
-    //This needs to be moved so we can find the right filename from the cache line's appropriate entry
-    FILE *file = fopen(filename, "r+b");
-    if (file == NULL) {
-        printf("# %s: failed to open file for writing\n", __FUNCTION__);
-    }
-    else {
-        uint32_t block = __builtin_ffs(mc_block_state);
-        //TODO: Pull this if statement out to before the file open since we need to check the block number, vmu_block, and vmu_number to figure out which file to open.
-        if (block) {
-            uint32_t count = 0;
-            block -= 1;
+    uint32_t block = __builtin_ffs(mc_block_state);
+    //TODO: Pull this if statement out to before the file open since we need to check the block number, vmu_block, and vmu_number to figure out which file to open.
+    if (block) {
+        uint32_t count = 0;
+        block -= 1;
+        FILE *file = fopen(filename_list[vmu_number[block]], "r+b");
+        if (file == NULL) {
+            printf("# %s: failed to open file for writing\n", __FUNCTION__);
+            return ret;
+        }
 
-            fseek(file, block * MC_BUFFER_BLOCK_SIZE, SEEK_SET);
-            count = fwrite((void *)mc_buffer[block], MC_BUFFER_BLOCK_SIZE, 1, file);
-            fclose(file);
 
-            if (count == 1) {
-                ret = 0;
-                atomic_clear_bit(&mc_block_state, block);
-            }
+        fseek(file, addr_range[block], SEEK_SET);
+        count = fwrite((void *)mc_buffer[block], MC_BUFFER_BLOCK_SIZE, 1, file);
+        fclose(file);
 
-            printf("# %s: block %ld updated cnt: %ld\n", __FUNCTION__, block, count);
+        if (count == 1) {
+            ret = 0;
+            atomic_clear_bit(&mc_block_state, block);
+        }
 
-            if (mc_block_state) {
-                mc_start_update_timer(20000);
-            }
+        printf("# %s: block %ld updated cnt: %ld\n", __FUNCTION__, block, count);
+
+        if (mc_block_state) {
+            mc_start_update_timer(20000);
         }
     }
     return ret;
 }
 
 static inline void mc_store_cb(void *arg) {
+    uint32_t count = 0;
+
     if(mc_fetch){
         //check for free slots
         uint32_t block = __builtin_ffs(~mc_block_state);
@@ -158,13 +159,17 @@ static inline void mc_store_cb(void *arg) {
         //Select line to fetch -- for now let's use ffs as above -- block = index of first 0 bit + 1
         block-=1;
 
-        FILE *file = fopen(filename[mc_fetch_card_num], "rb");
+        FILE *file = fopen(filename_list[mc_fetch_card_num], "rb");
         if (file == NULL) {
-            printf("# %s: failed to open file for writing\n", __FUNCTION__);
+            printf("# %s: failed to open file for reading\n", __FUNCTION__);
         }        
         fseek(file, mc_fetch_addr & MC_ADDR_RANGE_COMPARE_MASK, SEEK_SET); //fetch the data, aligned on block size
-        count = fwrite((void *)mc_buffer[block], MC_BUFFER_BLOCK_SIZE, 1, file);
+        count = fread((void *)mc_buffer[block], MC_BUFFER_BLOCK_SIZE, 1, file);
         fclose(file);
+
+        if(count==0){
+            printf("%s: failed to read file during fetch\n",__FUNCTION__);
+        }
 
         //Update cache table
         vmu_number[block] = mc_fetch_card_num;
@@ -229,9 +234,10 @@ void mc_read(uint32_t addr, uint8_t *data, uint32_t size) {
 }
 
 void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
+    struct raw_fb fb_data = {0};
     //Search for the block in cache
     for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-        if((addr_range[i] == addr & MC_ADDR_RANGE_COMPARE_MASK) && vmu_number[i] == memcard_no) {
+        if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
             memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
             //Later, update the LRU counter here if we implement that
             return;
@@ -257,11 +263,11 @@ void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
         delay_us(1000);
     }
     
-    if(!fetch_success) ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
+    if(!fetch_success) printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
     else {
             //Search for the block in cache
         for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if((addr_range[i] == addr & MC_ADDR_RANGE_COMPARE_MASK) && vmu_number[i] == memcard_no) {
+            if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
                 memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
                 //Later, update the LRU counter here if we implement that
                 return;
@@ -285,10 +291,10 @@ void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
 
 void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
     struct raw_fb fb_data = {0};
-    uint32_t block = addr >> 12
+    uint32_t block = addr >> 12;
     //Search for the block in cache
     for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-        if((addr_range[i] == addr & MC_ADDR_RANGE_COMPARE_MASK) && vmu_number[i] == memcard_no) {
+        if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
             memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
             atomic_set_bit(&mc_block_state, block);
 
@@ -320,11 +326,11 @@ void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t mem
         delay_us(1000);
     }
     
-    if(!fetch_success) ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
+    if(!fetch_success) printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
     else {
             //Search for the block in cache
         for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if((addr_range[i] == addr & MC_ADDR_RANGE_COMPARE_MASK) && vmu_number[i] == memcard_no) {
+            if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
                 memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
                 atomic_set_bit(&mc_block_state, block);
 

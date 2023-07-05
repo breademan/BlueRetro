@@ -36,7 +36,7 @@ static uint32_t addr_range[MC_BUFFER_BLOCK_CNT]={0}; // Holds which cache line i
 // Addresses are byte-addressed out of 128KB space, which is 17 bits to store, but since the address ranges are 4KB each, there are only 32 possible values
 // Time/memory tradeoff: We can either store a 32bit address or store an 8bit address and left-shift it 12 places each time
 // For code simplicity, I'll go with the latter
-static bool mc_fetch = 0;
+static int32_t mc_fetch = 0;
 static uint8_t mc_fetch_card_num = 0;
 static uint32_t mc_fetch_addr = NULL;
 
@@ -236,7 +236,7 @@ void mc_read(uint32_t addr, uint8_t *data, uint32_t size) {
 void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
     struct raw_fb fb_data = {0};
     //Search for the block in cache
-    for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
+    for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
         if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
             memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
             //Later, update the LRU counter here if we implement that
@@ -244,7 +244,7 @@ void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
         }
     }
     //If not found in cache, we'll need to fetch it.
-    mc_fetch = true;
+    atomic_set(&mc_fetch,1);
     mc_fetch_addr = addr;
     mc_fetch_card_num = memcard_no;
     //push out feedback and wait
@@ -293,10 +293,11 @@ void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t mem
     struct raw_fb fb_data = {0};
     uint32_t block = addr >> 12;
     //Search for the block in cache
-    for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
+    for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
         if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
             memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-            atomic_set_bit(&mc_block_state, block);
+            atomic_set_bit(&mc_block_state, i); //It appears that changing i to a uint32_t from _8t fixes it? Or is it  a problem with having it plugged up
+            //To the serial monitor? Or some kind of weird random chance? I don't know
 
             fb_data.header.wired_id = 0;
             fb_data.header.type = FB_TYPE_MEM_WRITE;
@@ -307,9 +308,9 @@ void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t mem
         }
     }
     //If not found in cache, we'll need to fetch it.
-    mc_fetch = true;
     mc_fetch_addr = addr;
     mc_fetch_card_num = memcard_no;
+    atomic_set(&mc_fetch,1);
     //push out feedback and wait
     fb_data.header.wired_id = 0;
     fb_data.header.type = FB_TYPE_MEM_WRITEBACK;

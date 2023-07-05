@@ -137,7 +137,7 @@ static int32_t mc_store_spread() {
             atomic_clear_bit(&mc_block_state, block);
         }
 
-        printf("# %s: block %ld updated cnt: %ld\n", __FUNCTION__, block, count);
+        printf("# %s: cache line %ld vmu number %d addr_range %lx written back cnt: %ld\n", __FUNCTION__, block, vmu_number[block], addr_range[block], count);
 
         if (mc_block_state) {
             mc_start_update_timer(20000);

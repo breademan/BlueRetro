@@ -149,7 +149,7 @@ static int32_t mc_store_spread() {
 static inline void mc_store_cb(void *arg) {
     uint32_t count = 0;
 
-    if(mc_fetch_state){
+    if(mc_fetch_state==MC_FETCHING){
         //check for free slots
         uint32_t block = __builtin_ffs(~mc_block_state);
         if(!block) { // all cache lines have yet to be written back
@@ -250,9 +250,9 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
         }
     }
     //If not found in cache, we'll need to fetch it.
-    atomic_set(&mc_fetch_state,MC_FETCHING);
     mc_fetch_addr = addr;
     mc_fetch_card_num = memcard_no;
+    atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait
     fb_data.header.wired_id = 0;
     fb_data.header.type = FB_TYPE_MEM_WRITEBACK;

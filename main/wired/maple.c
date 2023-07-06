@@ -653,7 +653,7 @@ maple_end:
                                 if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
                                     phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                    //data might be written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
+                                    //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
                                     mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0);
                                 }

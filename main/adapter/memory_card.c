@@ -36,7 +36,7 @@ static uint32_t addr_range[MC_BUFFER_BLOCK_CNT]={0}; // Holds which cache line i
 // Addresses are byte-addressed out of 128KB space, which is 17 bits to store, but since the address ranges are 4KB each, there are only 32 possible values
 // Time/memory tradeoff: We can either store a 32bit address or store an 8bit address and left-shift it 12 places each time
 // For code simplicity, I'll go with the latter
-static int32_t mc_fetch = 0;
+static enum mc_fetch_state_t {MC_FETCH_FINISHED=0, MC_FETCHING, MC_FETCH_FAILED} mc_fetch_state = MC_FETCH_FINISHED;
 static uint8_t mc_fetch_card_num = 0;
 static uint32_t mc_fetch_addr = NULL;
 
@@ -149,7 +149,7 @@ static int32_t mc_store_spread() {
 static inline void mc_store_cb(void *arg) {
     uint32_t count = 0;
 
-    if(mc_fetch){
+    if(mc_fetch_state){
         //check for free slots
         uint32_t block = __builtin_ffs(~mc_block_state);
         if(!block) { // all cache lines have yet to be written back
@@ -157,6 +157,12 @@ static inline void mc_store_cb(void *arg) {
             block = __builtin_ffs(~mc_block_state);
         }
         //Select line to fetch -- for now let's use ffs as above -- block = index of first 0 bit + 1
+        if(!block){
+            //writeback failed, don't overrwrite any data
+            //set a flag saying the fetch failed so we can send an 0xFC (resend last packet AKA you're going too fast)
+            atomic_set(&mc_fetch_state,MC_FETCH_FAILED);
+        }
+        else{
         block-=1;
 
         FILE *file = fopen(filename_list[mc_fetch_card_num], "rb");
@@ -174,9 +180,9 @@ static inline void mc_store_cb(void *arg) {
         //Update cache table
         vmu_number[block] = mc_fetch_card_num;
         addr_range[block] = mc_fetch_addr & MC_ADDR_RANGE_COMPARE_MASK;
-        mc_fetch = false;
+        atomic_clear(&mc_fetch_state);
         printf("# %s: fetched addr %lx from card %d to block %ld\n", __FUNCTION__, mc_fetch_addr, mc_fetch_card_num,block);
-        
+        }
     }
     else (void)mc_store_spread();
 }
@@ -233,7 +239,7 @@ void mc_read(uint32_t addr, uint8_t *data, uint32_t size) {
     memcpy(data, mc_buffer[addr >> 12] + (addr & 0xFFF), size);
 }
 
-void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
+int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
     struct raw_fb fb_data = {0};
     //Search for the block in cache
     for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
@@ -244,7 +250,7 @@ void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
         }
     }
     //If not found in cache, we'll need to fetch it.
-    atomic_set(&mc_fetch,1);
+    atomic_set(&mc_fetch_state,MC_FETCHING);
     mc_fetch_addr = addr;
     mc_fetch_card_num = memcard_no;
     //push out feedback and wait
@@ -253,24 +259,34 @@ void mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     fb_data.header.data_len = 0;
     adapter_q_fb(&fb_data);
 
-    bool fetch_success = false;
+    bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (!mc_fetch) {
-            fetch_success=true;
+        if (mc_fetch_state != MC_FETCH_FINISHED) {
+            timed_out = false;
             break;
         }
         delay_us(1000);
     }
     
-    if(!fetch_success) printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
+    if(timed_out){
+        printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__)
+        atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
+        return -1;
+        };
+    else if (mc_fetch_state == MC_FETCH_FAILED){
+        printf("%s: fetch failed.\n",__FUNCTION__)
+        atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch
+        // But instead I'll try to fetch at most once per r/w command
+        return -1;
+    }
     else {
             //Search for the block in cache
         for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
             if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
                 memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
                 //Later, update the LRU counter here if we implement that
-                return;
+                return 0;
             }
         }
     }
@@ -289,7 +305,7 @@ void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
     adapter_q_fb(&fb_data);
 }
 
-void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
+int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
     struct raw_fb fb_data = {0};
     uint32_t block = addr >> 12;
     //Search for the block in cache
@@ -310,24 +326,33 @@ void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t mem
     //If not found in cache, we'll need to fetch it.
     mc_fetch_addr = addr;
     mc_fetch_card_num = memcard_no;
-    atomic_set(&mc_fetch,1);
+    atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait
     fb_data.header.wired_id = 0;
     fb_data.header.type = FB_TYPE_MEM_WRITEBACK;
     fb_data.header.data_len = 0;
     adapter_q_fb(&fb_data);
 
-    bool fetch_success = false;
+    bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (!mc_fetch) {
-            fetch_success=true;
+        if (mc_fetch_state != MC_FETCH_FINISHED) {
+            timed_out=false;
             break;
         }
         delay_us(1000);
     }
     
-    if(!fetch_success) printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
+    if(timed_out){
+        printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__)
+        atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
+        return -1;
+        };
+    else if (mc_fetch_state == MC_FETCH_FAILED){
+        printf("%s: fetch failed.\n",__FUNCTION__)
+        atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch, but instead I'll try to fetch at most once per r/w command
+        return -1;
+    }
     else {
             //Search for the block in cache
         for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
@@ -340,7 +365,7 @@ void mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t mem
                 fb_data.header.data_len = 0;
                 adapter_q_fb(&fb_data);
                 //Later, update the LRU counter here if we implement that
-                return;
+                return 0;
             }
         }
     }

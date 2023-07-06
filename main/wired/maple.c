@@ -28,20 +28,26 @@
 #define ID_RUMBLE  0x00000100
 #define ID_MOUSE   0x00000200
 
-#define CMD_INFO_REQ      0x01
-#define CMD_EXT_INFO_REQ  0x02
-#define CMD_RESET         0x03
-#define CMD_SHUTDOWN      0x04
-#define CMD_INFO_RSP      0x05
-#define CMD_EXT_INFO_RSP  0x06
-#define CMD_ACK           0x07
-#define CMD_DATA_TX       0x08
-#define CMD_GET_CONDITION 0x09
-#define CMD_MEM_INFO_REQ  0x0A
-#define CMD_BLOCK_READ    0x0B
-#define CMD_BLOCK_WRITE   0x0C
+#define CMD_INFO_REQ       0x01
+#define CMD_EXT_INFO_REQ   0x02
+#define CMD_RESET          0x03
+#define CMD_SHUTDOWN       0x04
+#define CMD_INFO_RSP       0x05
+#define CMD_EXT_INFO_RSP   0x06
+#define CMD_ACK            0x07
+#define CMD_DATA_TX        0x08
+#define CMD_GET_CONDITION  0x09
+#define CMD_MEM_INFO_REQ   0x0A
+#define CMD_BLOCK_READ     0x0B
+#define CMD_BLOCK_WRITE    0x0C
 #define CMD_WRITE_COMPLETE 0x0D
-#define CMD_SET_CONDITION 0x0E
+#define CMD_SET_CONDITION  0x0E
+#define CMD_ERROR_GENERIC  0xFA
+#define CMD_E_INVALID_ADDR 0xFB
+#define CMD_E_RESEND_LAST  0xFC
+#define CMD_E_CMD_UNKNOWN  0xFD
+#define CMD_E_FUNC_UNKNOWN 0xFE
+
 
 #define ADDR_MASK   0x3F
 #define ADDR_MAIN   0x20
@@ -636,26 +642,37 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_BLOCK_READ:
-                                pkt.len = 0x82;
-                                pkt.cmd = CMD_DATA_TX;
-                                pkt.data32[0] = ID_VMU_MEM;
-                                //pkt.data32[1] // This should be the same as what the host sent, though this also applies for [0].
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0);
-                                maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                if(mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0)==0);
+                                {                                
+                                    pkt.len = 0x82;
+                                    pkt.cmd = CMD_DATA_TX;
+                                    pkt.data32[0] = ID_VMU_MEM;
+                                    maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                }
+                                else{ //read failed, request resend.
+                                    pkt.len = 0x00;
+                                    pkt.cmd = CMD_E_RESEND_LAST;
+                                    maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
+                                }
+
                                 break;
                             case CMD_BLOCK_WRITE:
                                 if(pkt.len!=32+2){ets_printf("Unexpected Block Write packet length: 0x%02X, expected 0x22\n", pkt.len);}
                                 pkt.len = 0x00;
-                                pkt.cmd = CMD_ACK;
                                 if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
                                     phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
                                     //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
-                                    mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0);
+                                    if(mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0)==0){
+                                        pkt.cmd = CMD_ACK;
+                                    }
+                                    else{
+                                        pkt.cmd = CMD_E_RESEND_LAST;
+                                    }
                                 }
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;

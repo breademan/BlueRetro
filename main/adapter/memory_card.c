@@ -14,6 +14,7 @@
 #include "system/fs.h"
 #include "memory_card.h"
 #include "system/delay.h"
+#include <esp32/rom/ets_sys.h>
 
 #define MC_BUFFER_SIZE (128 * 1024)
 #define MC_BUFFER_BLOCK_SIZE (4 * 1024)
@@ -246,7 +247,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
         if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
             memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
             //Later, update the LRU counter here if we implement that
-            return;
+            return 0;
         }
     }
     //If not found in cache, we'll need to fetch it.
@@ -270,12 +271,12 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
     }
     
     if(timed_out){
-        printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__)
+        ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
         atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
         return -1;
-        };
+        }
     else if (mc_fetch_state == MC_FETCH_FAILED){
-        printf("%s: fetch failed.\n",__FUNCTION__)
+        ets_printf("%s: fetch failed.\n",__FUNCTION__);
         atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch
         // But instead I'll try to fetch at most once per r/w command
         return -1;
@@ -289,6 +290,9 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
                 return 0;
             }
         }
+        //If we got here, we claim to have completed fetch yet nothing is matching the correct table entry. 
+        ets_printf("%s fetch succeeded but no corresponding block found: searching for address %lx\n",__FUNCTION__,addr);
+        return -1;
     }
 }
 
@@ -320,7 +324,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
             fb_data.header.data_len = 0;
             adapter_q_fb(&fb_data);
             //Later, update the LRU counter here if we implement that
-            return;
+            return 0;
         }
     }
     //If not found in cache, we'll need to fetch it.
@@ -344,12 +348,12 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     }
     
     if(timed_out){
-        printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__)
+        ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
         atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
         return -1;
-        };
+        }
     else if (mc_fetch_state == MC_FETCH_FAILED){
-        printf("%s: fetch failed.\n",__FUNCTION__)
+        ets_printf("%s: fetch failed.\n",__FUNCTION__);
         atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch, but instead I'll try to fetch at most once per r/w command
         return -1;
     }
@@ -368,6 +372,9 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
                 return 0;
             }
         }
+    //Fetch reports success, but write to buffer still fails? This should never happen: if it does, we know the fetch logic fetched the wrong data.
+    ets_printf("%s fetch succeeded but no corresponding block found: searching for address %lx\n",__FUNCTION__,addr);
+    return -1;
     }
 }
 

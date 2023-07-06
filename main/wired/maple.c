@@ -645,7 +645,7 @@ maple_end:
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                if(mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0)==0);
+                                if(mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0)==0)
                                 {                                
                                     pkt.len = 0x82;
                                     pkt.cmd = CMD_DATA_TX;

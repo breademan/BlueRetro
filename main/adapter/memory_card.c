@@ -140,9 +140,6 @@ static int32_t mc_store_spread() {
 
         printf("# %s: cache line %ld vmu number %d addr_range %lx written back cnt: %ld\n", __FUNCTION__, block, vmu_number[block], addr_range[block], count);
 
-        if (mc_block_state) {
-            mc_start_update_timer(20000);
-        }
     }
     return ret;
 }
@@ -186,6 +183,9 @@ static inline void mc_store_cb(void *arg) {
         }
     }
     else (void)mc_store_spread();
+    if (mc_block_state) {
+        mc_start_update_timer(20000);
+    }
 }
 
 int32_t mc_init(void) {
@@ -263,7 +263,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out = false;
             break;
         }
@@ -311,7 +311,6 @@ void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
 
 int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
     struct raw_fb fb_data = {0};
-    uint32_t block = addr >> 12;
     //Search for the block in cache
     for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
         if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
@@ -340,7 +339,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out=false;
             break;
         }
@@ -359,10 +358,10 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     }
     else {
             //Search for the block in cache
-        for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
+        for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
             if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
                 memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-                atomic_set_bit(&mc_block_state, block);
+                atomic_set_bit(&mc_block_state, i);
 
                 fb_data.header.wired_id = 0;
                 fb_data.header.type = FB_TYPE_MEM_WRITE;

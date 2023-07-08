@@ -621,6 +621,7 @@ maple_end:
                         pkt.dst = dst;
                         switch(cmd) {
                             case CMD_INFO_REQ:
+                                ets_printf("Memcard address received Info Req (0x01)\n");
                                 pkt.len = 28;
                                 pkt.cmd = CMD_INFO_RSP;
                                 pkt.data32[0] = ID_VMU_MEM | ID_VMU_LCD | ID_VMU_CLK;
@@ -632,9 +633,12 @@ maple_end:
                                 pkt.data32[27] = PWR_VMU;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
-                            case CMD_EXT_INFO_REQ: //unimplemented
+                            case CMD_EXT_INFO_REQ:
+                            ets_printf("Memcard address received Extended Info Req (0x02)\n"); //unimplemented
                             case CMD_GET_CONDITION:
+                            ets_printf("Memcard address received Get Condition (0x09)\n");
                             case CMD_MEM_INFO_REQ:
+                            ets_printf("Memcard address received Memory Info Request\n");
                                 pkt.len = 0x07;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = ID_VMU_MEM;
@@ -645,14 +649,17 @@ maple_end:
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
+                                ets_printf("read from block %x",block_no);
                                 if(mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0)==0)
-                                {                                
+                                {                               
+                                    ets_printf(" success! Sending data.\n"); 
                                     pkt.len = 0x82;
                                     pkt.cmd = CMD_DATA_TX;
                                     pkt.data32[0] = ID_VMU_MEM;
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 }
                                 else{ //read failed, request resend.
+                                ets_printf(" failed! Requesting resend!\n");
                                     pkt.len = 0x00;
                                     pkt.cmd = CMD_E_RESEND_LAST;
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
@@ -671,6 +678,7 @@ maple_end:
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
                                     //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
+                                    ets_printf("write to block %x:%x\n",block_no,phase);
                                     if(mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0)==0){
                                         pkt.cmd = CMD_ACK;
                                     }
@@ -687,6 +695,7 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_WRITE_COMPLETE:
+                                ets_printf("Memcard address received Write Complete\n");
                                 pkt.len = 0x00;
                                 pkt.cmd = CMD_ACK;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);

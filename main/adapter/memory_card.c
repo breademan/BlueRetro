@@ -118,6 +118,7 @@ static int32_t mc_store(char *filename) {
 static int32_t mc_store_spread() {
     int32_t ret = -1;
     uint32_t block = __builtin_ffs(mc_block_state);
+    //TODO: Pull this if statement out to before the file open since we need to check the block number, vmu_block, and vmu_number to figure out which file to open.
     if (block) {
         uint32_t count = 0;
         block -= 1;
@@ -246,6 +247,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
         }
     }
     //If not found in cache, we'll need to fetch it.
+    mc_fetch = true;
     mc_fetch_addr = addr;
     atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait
@@ -320,6 +322,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
         }
     }
     //If not found in cache, we'll need to fetch it.
+    mc_fetch = true;
     mc_fetch_addr = addr;
     atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait

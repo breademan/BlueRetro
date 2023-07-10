@@ -56,35 +56,32 @@ static void mc_start_update_timer(uint64_t timeout_us) {
 static int32_t mc_restore() {
     struct stat st;
     int32_t ret = -1;
-    for (uint8_t i = 0; i<num_files;i++){
-        if (stat(mc_filename, &st) != 0) {
-            printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
-            ret = mc_store(mc_filename);
-        }
+    if (stat(mc_filename, &st) != 0) {
+        printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
+        ret = mc_store(mc_filename);
     }
-        // Read last file in filename_list into memory
-        FILE *file = fopen(mc_filename_list, "rb");
-        if(wired_adapter.system_id==DC) fseek(file, (0b0011<<17), SEEK_SET); //If it's the dreamcast, read from the last memcard to cause cache misses for debugging.
-        if (file == NULL) {
-            printf("# %s: failed to open file for reading\n", __FUNCTION__);
+    FILE *file = fopen(mc_filename, "rb");
+    if(wired_adapter.system_id==DC) fseek(file, (0b0011<<17), SEEK_SET); //If it's the dreamcast, read from the last memcard to cause cache misses for debugging.
+    if (file == NULL) {
+        printf("# %s: failed to open file for reading\n", __FUNCTION__);
+    }
+    else {
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < MC_BUFFER_BLOCK_CNT; i++) {
+            count += fread((void *)mc_buffer[i], MC_BUFFER_BLOCK_SIZE, 1, file);
+            addr_range[i] = i*MC_BUFFER_BLOCK_SIZE;
+            if(wired_adapter.system_id==DC) addr_range[i] |= (0b0011<<17); //Record that this is a read from memcard 3
+        }
+        fclose(file);
+
+        if (count == MC_BUFFER_BLOCK_CNT) {
+            ret = 0;
+            printf("# %s: restore sucessful!\n", __FUNCTION__);
         }
         else {
-            uint32_t count = 0;
-            for (uint32_t i = 0; i < MC_BUFFER_BLOCK_CNT; i++) {
-                count += fread((void *)mc_buffer[i], MC_BUFFER_BLOCK_SIZE, 1, file);
-                addr_range[i] = i*MC_BUFFER_BLOCK_SIZE;
-                if(wired_adapter.system_id==DC) addr_range[i] |= (0011b<<17); //Record that this is a read from memcard 3
-            }
-            fclose(file);
-
-            if (count == MC_BUFFER_BLOCK_CNT) {
-                ret = 0;
-                printf("# %s: restore sucessful!\n", __FUNCTION__);
-            }
-            else {
-                printf("# %s: restore failed! cnt: %ld File size:%ld\n", __FUNCTION__, count, st.st_size);
-            }
+            printf("# %s: restore failed! cnt: %ld File size:%ld\n", __FUNCTION__, count, st.st_size);
         }
+    }
     return ret;
 }
 
@@ -105,7 +102,7 @@ static int32_t mc_store(char *filename) {
         if(wired_adapter.system_id==DC) target_count = 4*MC_BUFFER_BLOCK_CNT;
         uint32_t count = 0;
         for (uint32_t i = 0; i < target_count; i++) {
-            count += fwrite((void *)mc_buffer[i&MC_BUFFER_BLOCK_CNT], MC_BUFFER_BLOCK_SIZE, 1, file);
+            count += fwrite((void *)mc_buffer[i&(MC_BUFFER_BLOCK_CNT-1)], MC_BUFFER_BLOCK_SIZE, 1, file);
         }
         fclose(file);
     
@@ -142,9 +139,6 @@ static int32_t mc_store_spread() {
 
         printf("# %s: cache line %ld addr_range %lx written back cnt: %ld\n", __FUNCTION__, block, addr_range[block], count);
 
-        if (mc_block_state) {
-            mc_start_update_timer(20000);
-        }
     }
     return ret;
 }
@@ -187,6 +181,10 @@ static inline void mc_store_cb(void *arg) {
         }
     }
     else (void)mc_store_spread();
+    
+    if (mc_block_state) {
+        mc_start_update_timer(20000);
+    }
 }
 
 int32_t mc_init(void) {
@@ -259,7 +257,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out = false;
             break;
         }
@@ -307,7 +305,6 @@ void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
 
 int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     struct raw_fb fb_data = {0};
-    uint32_t block = addr >> 12;
     //Search for the block in cache
     for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
         if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
@@ -334,7 +331,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out=false;
             break;
         }
@@ -353,10 +350,10 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     }
     else {
             //Search for the block in cache
-        for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
+        for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
             if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
                 memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-                atomic_set_bit(&mc_block_state, block);
+                atomic_set_bit(&mc_block_state, i);
 
                 fb_data.header.wired_id = 0;
                 fb_data.header.type = FB_TYPE_MEM_WRITE;

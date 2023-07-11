@@ -29,16 +29,13 @@ SOC_RESERVE_MEMORY_REGION(0x3FFE7D98, 0x3FFE7E28, bad_region);
 static uint8_t *mc_buffer[MC_BUFFER_BLOCK_CNT] = {0};
 static esp_timer_handle_t mc_timer_hdl = NULL;
 static int32_t mc_block_state = 0; // Holds which cache line is not yet written back to flash
-static uint8_t num_files = 1;
-static char * filename_list[MC_MAX_FILE_CNT]; // List of files which the memory card contains
-static uint8_t vmu_number[MC_BUFFER_BLOCK_CNT]={0}; // Holds which cache line is mapped to which file; index is the cache line, value is the index in filename_list
+static char * mc_filename; // Contains the file name
 static uint32_t addr_range[MC_BUFFER_BLOCK_CNT]={0}; // Holds which cache line is mapped to which addresses.
 #define MC_ADDR_RANGE_COMPARE_MASK (0xFFFFF000)
 // Addresses are byte-addressed out of 128KB space, which is 17 bits to store, but since the address ranges are 4KB each, there are only 32 possible values
 // Time/memory tradeoff: We can either store a 32bit address or store an 8bit address and left-shift it 12 places each time
 // For code simplicity, I'll go with the latter
 static enum mc_fetch_state_t {MC_FETCH_FINISHED=0, MC_FETCHING, MC_FETCH_FAILED} mc_fetch_state = MC_FETCH_FINISHED;
-static uint8_t mc_fetch_card_num = 0;
 static uint32_t mc_fetch_addr = NULL;
 
 
@@ -59,39 +56,40 @@ static void mc_start_update_timer(uint64_t timeout_us) {
 static int32_t mc_restore() {
     struct stat st;
     int32_t ret = -1;
-    for (uint8_t i = 0; i<num_files;i++){
-        if (stat(filename_list[i], &st) != 0) {
-            printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
-            ret = mc_store(filename_list[i]);
-        }
+    if (stat(mc_filename, &st) != 0) {
+        printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
+        ret = mc_store(mc_filename);
     }
-        // Read last file in filename_list into memory
-        FILE *file = fopen(filename_list[num_files-1], "rb");
-        if (file == NULL) {
-            printf("# %s: failed to open file for reading\n", __FUNCTION__);
+    FILE *file = fopen(mc_filename, "rb");
+    if(wired_adapter.system_id==DC) fseek(file, (0b0011<<17), SEEK_SET); //If it's the dreamcast, read from the last memcard to cause cache misses for debugging.
+    if (file == NULL) {
+        printf("# %s: failed to open file for reading\n", __FUNCTION__);
+    }
+    else {
+        uint32_t count = 0;
+        for (uint32_t i = 0; i < MC_BUFFER_BLOCK_CNT; i++) {
+            count += fread((void *)mc_buffer[i], MC_BUFFER_BLOCK_SIZE, 1, file);
+            addr_range[i] = i*MC_BUFFER_BLOCK_SIZE;
+            if(wired_adapter.system_id==DC) addr_range[i] |= (0b0011<<17); //Record that this is a read from memcard 3
+        }
+        fclose(file);
+
+        if (count == MC_BUFFER_BLOCK_CNT) {
+            ret = 0;
+            printf("# %s: restore sucessful!\n", __FUNCTION__);
         }
         else {
-            uint32_t count = 0;
-            for (uint32_t i = 0; i < MC_BUFFER_BLOCK_CNT; i++) {
-                count += fread((void *)mc_buffer[i], MC_BUFFER_BLOCK_SIZE, 1, file);
-                vmu_number[i] = num_files-1;
-                addr_range[i] = i*MC_BUFFER_BLOCK_SIZE;
-            }
-            fclose(file);
-
-            if (count == MC_BUFFER_BLOCK_CNT) {
-                ret = 0;
-                printf("# %s: restore sucessful!\n", __FUNCTION__);
-            }
-            else {
-                printf("# %s: restore failed! cnt: %ld File size:%ld\n", __FUNCTION__, count, st.st_size);
-            }
+            printf("# %s: restore failed! cnt: %ld File size:%ld\n", __FUNCTION__, count, st.st_size);
         }
+    }
     return ret;
 }
 
 // Writes the entire memory card buffer back to flash
 // Currently only used to create a new memory card and fill it with effectively junk data
+// Only creates a new file with the size MC_BUFFER_BLOCK_CNT: For Dreamcast, we want it to create a file 4x that.
+// Writing back with this for a DC memcard will no longer be a valid writeback -- We should change this function to only initialize a memory card
+// TODO Rename to mc_create and zero-fill instead of putting in junk data
 static int32_t mc_store(char *filename) {
     int32_t ret = -1;
 
@@ -100,13 +98,15 @@ static int32_t mc_store(char *filename) {
         printf("# %s: failed to open file for writing\n", __FUNCTION__);
     }
     else {
+        uint32_t target_count = MC_BUFFER_BLOCK_CNT;
+        if(wired_adapter.system_id==DC) target_count = 4*MC_BUFFER_BLOCK_CNT;
         uint32_t count = 0;
-        for (uint32_t i = 0; i < MC_BUFFER_BLOCK_CNT; i++) {
-            count += fwrite((void *)mc_buffer[i], MC_BUFFER_BLOCK_SIZE, 1, file);
+        for (uint32_t i = 0; i < target_count; i++) {
+            count += fwrite((void *)mc_buffer[i&(MC_BUFFER_BLOCK_CNT-1)], MC_BUFFER_BLOCK_SIZE, 1, file);
         }
         fclose(file);
-
-        if (count == MC_BUFFER_BLOCK_CNT) {
+    
+        if (count == target_count) {
             ret = 0;
             mc_block_state = 0;
         }
@@ -118,11 +118,10 @@ static int32_t mc_store(char *filename) {
 static int32_t mc_store_spread() {
     int32_t ret = -1;
     uint32_t block = __builtin_ffs(mc_block_state);
-    //TODO: Pull this if statement out to before the file open since we need to check the block number, vmu_block, and vmu_number to figure out which file to open.
     if (block) {
         uint32_t count = 0;
         block -= 1;
-        FILE *file = fopen(filename_list[vmu_number[block]], "r+b");
+        FILE *file = fopen(mc_filename, "r+b");
         if (file == NULL) {
             printf("# %s: failed to open file for writing\n", __FUNCTION__);
             return ret;
@@ -138,11 +137,8 @@ static int32_t mc_store_spread() {
             atomic_clear_bit(&mc_block_state, block);
         }
 
-        printf("# %s: cache line %ld vmu number %d addr_range %lx written back cnt: %ld\n", __FUNCTION__, block, vmu_number[block], addr_range[block], count);
+        printf("# %s: cache line %ld addr_range %lx written back cnt: %ld\n", __FUNCTION__, block, addr_range[block], count);
 
-        if (mc_block_state) {
-            mc_start_update_timer(20000);
-        }
     }
     return ret;
 }
@@ -166,7 +162,7 @@ static inline void mc_store_cb(void *arg) {
         else{
         block-=1;
 
-        FILE *file = fopen(filename_list[mc_fetch_card_num], "rb");
+        FILE *file = fopen(mc_filename, "rb");
         if (file == NULL) {
             printf("# %s: failed to open file for reading\n", __FUNCTION__);
         }        
@@ -179,13 +175,16 @@ static inline void mc_store_cb(void *arg) {
         }
 
         //Update cache table
-        vmu_number[block] = mc_fetch_card_num;
         addr_range[block] = mc_fetch_addr & MC_ADDR_RANGE_COMPARE_MASK;
         atomic_clear(&mc_fetch_state);
-        printf("# %s: fetched addr %lx from card %d to block %ld\n", __FUNCTION__, mc_fetch_addr, mc_fetch_card_num,block);
+        printf("# %s: fetched addr %lx to block %ld\n", __FUNCTION__, mc_fetch_addr,block);
         }
     }
     else (void)mc_store_spread();
+    
+    if (mc_block_state) {
+        mc_start_update_timer(20000);
+    }
 }
 
 int32_t mc_init(void) {
@@ -209,15 +208,10 @@ int32_t mc_init(void) {
     esp_timer_create(&mc_timer_args, &mc_timer_hdl);
 
     if(wired_adapter.system_id==DC) {
-        num_files=4;
-        filename_list[0]=VMU_0_FILE;
-        filename_list[1]=VMU_1_FILE;
-        filename_list[2]=VMU_2_FILE;
-        filename_list[3]=VMU_3_FILE;
+        mc_filename=VMU_0_FILE;
     }
     else {
-        num_files=1;
-        filename_list[0]=N64_MEMORY_CARD_FILE;
+        mc_filename=N64_MEMORY_CARD_FILE;
     }
     ret = mc_restore();
 
@@ -240,11 +234,12 @@ void mc_read(uint32_t addr, uint8_t *data, uint32_t size) {
     memcpy(data, mc_buffer[addr >> 12] + (addr & 0xFFF), size);
 }
 
-int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
+
+int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     struct raw_fb fb_data = {0};
     //Search for the block in cache
     for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-        if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
+        if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
             memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
             //Later, update the LRU counter here if we implement that
             return 0;
@@ -252,7 +247,6 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
     }
     //If not found in cache, we'll need to fetch it.
     mc_fetch_addr = addr;
-    mc_fetch_card_num = memcard_no;
     atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait
     fb_data.header.wired_id = 0;
@@ -263,7 +257,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out = false;
             break;
         }
@@ -284,7 +278,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memca
     else {
             //Search for the block in cache
         for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
+            if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
                 memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
                 //Later, update the LRU counter here if we implement that
                 return 0;
@@ -309,15 +303,13 @@ void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
     adapter_q_fb(&fb_data);
 }
 
-int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memcard_no) {
+int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     struct raw_fb fb_data = {0};
-    uint32_t block = addr >> 12;
     //Search for the block in cache
     for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-        if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
+        if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
             memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-            atomic_set_bit(&mc_block_state, i); //It appears that changing i to a uint32_t from _8t fixes it? Or is it  a problem with having it plugged up
-            //To the serial monitor? Or some kind of weird random chance? I don't know
+            atomic_set_bit(&mc_block_state, i);
 
             fb_data.header.wired_id = 0;
             fb_data.header.type = FB_TYPE_MEM_WRITE;
@@ -329,7 +321,6 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     }
     //If not found in cache, we'll need to fetch it.
     mc_fetch_addr = addr;
-    mc_fetch_card_num = memcard_no;
     atomic_set(&mc_fetch_state,MC_FETCHING);
     //push out feedback and wait
     fb_data.header.wired_id = 0;
@@ -340,7 +331,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     bool timed_out = true;
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCH_FINISHED) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out=false;
             break;
         }
@@ -359,10 +350,10 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size, uint8_t memc
     }
     else {
             //Search for the block in cache
-        for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if((addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) && vmu_number[i] == memcard_no) {
+        for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
+            if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
                 memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-                atomic_set_bit(&mc_block_state, block);
+                atomic_set_bit(&mc_block_state, i);
 
                 fb_data.header.wired_id = 0;
                 fb_data.header.type = FB_TYPE_MEM_WRITE;

@@ -645,7 +645,7 @@ maple_end:
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                if(mc_read_multicard(block_no*512, (void *) &pkt.data32[2],512,0)==0)
+                                if(mc_read_multicard((block_no*512) | ((port & 0b0011)<<17), (void *) &pkt.data32[2],512)==0)
                                 {                                
                                     pkt.len = 0x82;
                                     pkt.cmd = CMD_DATA_TX;
@@ -659,21 +659,31 @@ maple_end:
                                 }
 
                                 break;
-                            case CMD_BLOCK_WRITE:
-                                if(pkt.len!=32+2){ets_printf("Unexpected Block Write packet length: 0x%02X, expected 0x22\n", pkt.len);}
-                                pkt.len = 0x00;
-                                if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
+                            case CMD_BLOCK_WRITE:                                
+                                pkt.cmd = CMD_E_RESEND_LAST;
+                                if(pkt.data32[0]==ID_VMU_LCD){
+                                    pkt.cmd = CMD_ACK;
+                                    if(pkt.len!=48+2) ets_printf("LCD write of unexpected length: 0x%02X, expected 0x32\n", pkt.len);
+                                }
+                                else if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
+                                    if((pkt.len!=32+2)){ets_printf("Valid Block Write for memory card function of unexpected packet length: 0x%02X, expected 0x22\n", pkt.len);}
                                     phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
                                     //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
-                                    if(mc_write_multicard((block_no*512)+(128*phase),(void *) &pkt.data32[2],128,0)==0){
+                                    if(mc_write_multicard(((block_no*512)+(128*phase)) | ((port & 0b0011)<<17),(void *) &pkt.data32[2],128)==0){
                                         pkt.cmd = CMD_ACK;
                                     }
-                                    else{
-                                        pkt.cmd = CMD_E_RESEND_LAST;
-                                    }
+                                    else pkt.cmd=CMD_E_RESEND_LAST; // Write failed
                                 }
+                                else if(pkt.data32[0]==ID_VMU_CLK){
+                                    if(pkt.len!=0xC+2) {ets_printf("Write for VMU clock of unexpected length: 0x%02X, expected 0xE\n", pkt.len);}
+                                    pkt.cmd = CMD_ACK;
+                                }
+                                else{
+                                    ets_printf("Received block write for function %ld or length %02x\n", pkt.data32[0],pkt.len);
+                                }
+                                pkt.len = 0x00;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_WRITE_COMPLETE:

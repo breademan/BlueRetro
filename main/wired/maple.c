@@ -621,7 +621,7 @@ maple_end:
                         pkt.dst = dst;
                         switch(cmd) {
                             case CMD_INFO_REQ:
-                                ets_printf("Memcard address received Info Req (0x01)\n");
+                                ets_printf("Memcard received Info Req (0x01)\n");
                                 pkt.len = 28;
                                 pkt.cmd = CMD_INFO_RSP;
                                 pkt.data32[0] = ID_VMU_MEM | ID_VMU_LCD | ID_VMU_CLK;
@@ -634,11 +634,11 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_EXT_INFO_REQ:
-                            ets_printf("Memcard address received Extended Info Req (0x02)\n"); //unimplemented
+                            ets_printf("Memcard received Extended Info Req (0x02)\n"); //unimplemented
                             case CMD_GET_CONDITION:
-                            ets_printf("Memcard address received Get Condition (0x09)\n");
+                            ets_printf("Memcard received Get Condition (0x09)\n");
                             case CMD_MEM_INFO_REQ:
-                            ets_printf("Memcard address received Memory Info Request\n");
+                            ets_printf("Memcard received Memory Info Request\n");
                                 pkt.len = 0x07;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = ID_VMU_MEM;

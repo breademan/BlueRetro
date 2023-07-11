@@ -258,6 +258,7 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     for(int timeout=30; timeout>0; timeout--){
         //check if mc_fetch is false to signal fetch completion
         if (mc_fetch_state != MC_FETCHING) {
+        if (mc_fetch_state != MC_FETCHING) {
             timed_out = false;
             break;
         }
@@ -353,6 +354,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
         for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
             if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
                 memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
+                atomic_set_bit(&mc_block_state, i);
                 atomic_set_bit(&mc_block_state, i);
 
                 fb_data.header.wired_id = 0;

@@ -621,6 +621,7 @@ maple_end:
                         pkt.dst = dst;
                         switch(cmd) {
                             case CMD_INFO_REQ:
+                                ets_printf("Memcard address received Info Req (0x01)\n");
                                 pkt.len = 28;
                                 pkt.cmd = CMD_INFO_RSP;
                                 pkt.data32[0] = ID_VMU_MEM | ID_VMU_LCD | ID_VMU_CLK;
@@ -632,9 +633,12 @@ maple_end:
                                 pkt.data32[27] = PWR_VMU;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
-                            case CMD_EXT_INFO_REQ: //unimplemented
+                            case CMD_EXT_INFO_REQ:
+                            ets_printf("Memcard address received Extended Info Req (0x02)\n"); //unimplemented
                             case CMD_GET_CONDITION:
+                            ets_printf("Memcard address received Get Condition (0x09)\n");
                             case CMD_MEM_INFO_REQ:
+                            ets_printf("Memcard address received Memory Info Request\n");
                                 pkt.len = 0x07;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = ID_VMU_MEM;
@@ -653,6 +657,7 @@ maple_end:
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 }
                                 else{ //read failed, request resend.
+                                ets_printf(" failed! Requesting resend!\n");
                                     pkt.len = 0x00;
                                     pkt.cmd = CMD_E_RESEND_LAST;
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
@@ -687,6 +692,7 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_WRITE_COMPLETE:
+                                ets_printf("Memcard address received Write Complete\n");
                                 pkt.len = 0x00;
                                 pkt.cmd = CMD_ACK;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);

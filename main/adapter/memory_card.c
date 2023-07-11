@@ -246,49 +246,17 @@ int mc_read_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
         }
     }
     //If not found in cache, we'll need to fetch it.
-    mc_fetch_addr = addr;
-    atomic_set(&mc_fetch_state,MC_FETCHING);
-    //push out feedback and wait
-    fb_data.header.wired_id = 0;
-    fb_data.header.type = FB_TYPE_MEM_WRITEBACK;
-    fb_data.header.data_len = 0;
-    adapter_q_fb(&fb_data);
-
-    bool timed_out = true;
-    for(int timeout=30; timeout>0; timeout--){
-        //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCHING) {
-        if (mc_fetch_state != MC_FETCHING) {
-            timed_out = false;
-            break;
-        }
-        delay_us(1000);
+    //Don't add a new fetch if the fetch queue is full.
+    if(mc_fetch_state!=MC_FETCHING){
+        mc_fetch_addr = addr;
+        atomic_set(&mc_fetch_state,MC_FETCHING);
+        //push out feedback and wait
+        fb_data.header.wired_id = 0;
+        fb_data.header.type = FB_TYPE_MEM_WRITEBACK;
+        fb_data.header.data_len = 0;
+        adapter_q_fb(&fb_data);
     }
-    
-    if(timed_out){
-        ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
-        atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
-        return -1;
-        }
-    else if (mc_fetch_state == MC_FETCH_FAILED){
-        ets_printf("%s: fetch failed.\n",__FUNCTION__);
-        atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch
-        // But instead I'll try to fetch at most once per r/w command
-        return -1;
-    }
-    else {
-            //Search for the block in cache
-        for (uint8_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
-                memcpy(data, mc_buffer[i] + (addr & 0xFFF), size);
-                //Later, update the LRU counter here if we implement that
-                return 0;
-            }
-        }
-        //If we got here, we claim to have completed fetch yet nothing is matching the correct table entry. 
-        ets_printf("%s fetch succeeded but no corresponding block found: searching for address %lx\n",__FUNCTION__,addr);
-        return -1;
-    }
+    return -1;
 }
 
 void mc_write(uint32_t addr, uint8_t *data, uint32_t size) {
@@ -321,54 +289,18 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
         }
     }
     //If not found in cache, we'll need to fetch it.
-    mc_fetch_addr = addr;
-    atomic_set(&mc_fetch_state,MC_FETCHING);
-    //push out feedback and wait
-    fb_data.header.wired_id = 0;
-    fb_data.header.type = FB_TYPE_MEM_WRITEBACK;
-    fb_data.header.data_len = 0;
-    adapter_q_fb(&fb_data);
-
-    bool timed_out = true;
-    for(int timeout=30; timeout>0; timeout--){
-        //check if mc_fetch is false to signal fetch completion
-        if (mc_fetch_state != MC_FETCHING) {
-            timed_out=false;
-            break;
-        }
-        delay_us(1000);
+    //However, if it's already fetching, we don't want to mess with it.
+    //TODO: if you implement a fetch queue, add the fetch to the queue unless it's full.
+    if(mc_state!=MC_FETCHING){
+        mc_fetch_addr = addr;
+        atomic_set(&mc_fetch_state,MC_FETCHING);
+        //push out feedback and wait
+        fb_data.header.wired_id = 0;
+        fb_data.header.type = FB_TYPE_MEM_WRITEBACK;
+        fb_data.header.data_len = 0;
+        adapter_q_fb(&fb_data);
     }
-    
-    if(timed_out){
-        ets_printf("%s: reached timeout on wait for fetch.\n",__FUNCTION__);
-        atomic_clear(&mc_fetch_state); //if it didn't fetch in 30ms it's not gonna finish.
-        return -1;
-        }
-    else if (mc_fetch_state == MC_FETCH_FAILED){
-        ets_printf("%s: fetch failed.\n",__FUNCTION__);
-        atomic_clear(&mc_fetch_state); // Clear the fetch flag. I could leave this set so it can keep retrying the fetch, but instead I'll try to fetch at most once per r/w command
-        return -1;
-    }
-    else {
-            //Search for the block in cache
-        for (uint32_t i=0; i<MC_BUFFER_BLOCK_CNT;i++){
-            if(addr_range[i] == (addr & MC_ADDR_RANGE_COMPARE_MASK)) {
-                memcpy(mc_buffer[i] + (addr & 0xFFF), data, size);
-                atomic_set_bit(&mc_block_state, i);
-                atomic_set_bit(&mc_block_state, i);
-
-                fb_data.header.wired_id = 0;
-                fb_data.header.type = FB_TYPE_MEM_WRITE;
-                fb_data.header.data_len = 0;
-                adapter_q_fb(&fb_data);
-                //Later, update the LRU counter here if we implement that
-                return 0;
-            }
-        }
-    //Fetch reports success, but write to buffer still fails? This should never happen: if it does, we know the fetch logic fetched the wrong data.
-    ets_printf("%s fetch succeeded but no corresponding block found: searching for address %lx\n",__FUNCTION__,addr);
     return -1;
-    }
 }
 
 uint8_t *mc_get_ptr(uint32_t addr) {

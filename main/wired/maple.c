@@ -656,8 +656,7 @@ maple_end:
                                     pkt.data32[0] = ID_VMU_MEM;
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 }
-                                else{ //read failed, request resend.
-                                ets_printf(" failed! Requesting resend!\n");
+                                else{
                                     pkt.len = 0x00;
                                     pkt.cmd = CMD_E_RESEND_LAST;
                                     maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
@@ -692,7 +691,6 @@ maple_end:
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);
                                 break;
                             case CMD_WRITE_COMPLETE:
-                                ets_printf("Memcard address received Write Complete\n");
                                 pkt.len = 0x00;
                                 pkt.cmd = CMD_ACK;
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);

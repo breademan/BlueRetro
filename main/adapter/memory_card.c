@@ -35,7 +35,10 @@ static uint32_t addr_range[MC_BUFFER_BLOCK_CNT]={0}; // Holds which cache line i
 // Addresses are byte-addressed out of 128KB space, which is 17 bits to store, but since the address ranges are 4KB each, there are only 32 possible values
 // Time/memory tradeoff: We can either store a 32bit address or store an 8bit address and left-shift it 12 places each time
 // For code simplicity, I'll go with the latter
-static enum mc_fetch_state_t {MC_FETCH_FINISHED=0, MC_FETCHING, MC_FETCH_FAILED} mc_fetch_state = MC_FETCH_FINISHED;
+#define MC_FETCH_FINISHED (0)
+#define MC_FETCHING (1)
+#define MC_FETCH_FAILED (2)
+static int32_t mc_fetch_state = MC_FETCH_FINISHED;
 static uint32_t mc_fetch_addr = NULL;
 
 
@@ -291,7 +294,7 @@ int mc_write_multicard(uint32_t addr, uint8_t *data, uint32_t size) {
     //If not found in cache, we'll need to fetch it.
     //However, if it's already fetching, we don't want to mess with it.
     //TODO: if you implement a fetch queue, add the fetch to the queue unless it's full.
-    if(mc_state!=MC_FETCHING){
+    if(mc_fetch_state!=MC_FETCHING){
         mc_fetch_addr = addr;
         atomic_set(&mc_fetch_state,MC_FETCHING);
         //push out feedback and wait

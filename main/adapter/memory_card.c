@@ -25,6 +25,7 @@ SOC_RESERVE_MEMORY_REGION(0x3FFE7D98, 0x3FFE7E28, bad_region);
 static uint8_t *mc_buffer[MC_BUFFER_BLOCK_CNT] = {0};
 static esp_timer_handle_t mc_timer_hdl = NULL;
 static int32_t mc_block_state = 0;
+static char * mc_filename;
 
 static int32_t mc_restore(void);
 static int32_t mc_store(void);
@@ -42,13 +43,14 @@ static void mc_start_update_timer(uint64_t timeout_us) {
 static int32_t mc_restore(void) {
     struct stat st;
     int32_t ret = -1;
-
-    if (stat(MEMORY_CARD_FILE, &st) != 0) {
+    if (wired_adapter.system_id==DC) mc_filename = DC_MEMORY_CARD_FILE;
+    else mc_filename = N64_MEMORY_CARD_FILE;
+    if (stat(mc_filename, &st) != 0) {
         printf("# %s: No Memory Card on FS. Creating...\n", __FUNCTION__);
         ret = mc_store();
     }
     else {
-        FILE *file = fopen(MEMORY_CARD_FILE, "rb");
+        FILE *file = fopen(mc_filename, "rb");
         if (file == NULL) {
             printf("# %s: failed to open file for reading\n", __FUNCTION__);
         }
@@ -74,7 +76,7 @@ static int32_t mc_restore(void) {
 static int32_t mc_store(void) {
     int32_t ret = -1;
 
-    FILE *file = fopen(MEMORY_CARD_FILE, "wb");
+    FILE *file = fopen(mc_filename, "wb");
     if (file == NULL) {
         printf("# %s: failed to open file for writing\n", __FUNCTION__);
     }
@@ -97,7 +99,7 @@ static int32_t mc_store(void) {
 static int32_t mc_store_spread(void) {
     int32_t ret = -1;
 
-    FILE *file = fopen(MEMORY_CARD_FILE, "r+b");
+    FILE *file = fopen(mc_filename, "r+b");
     if (file == NULL) {
         printf("# %s: failed to open file for writing\n", __FUNCTION__);
     }

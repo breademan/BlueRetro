@@ -11,7 +11,8 @@
 #define LE_LINK_KEYS_FILE "/fs/le_linkkeys.bin"
 #define BDADDR_FILE "/fs/bdaddr.bin"
 #define CONFIG_FILE "/fs/config.bin"
-#define MEMORY_CARD_FILE "/fs/mc.bin"
+#define N64_MEMORY_CARD_FILE "/fs/mc.bin"
+#define DC_MEMORY_CARD_FILE "/fs/vmu0.bin"
 #define BITSTREAM_FILE "/fs/bitstream.bit"
 
 int32_t fs_init(void);

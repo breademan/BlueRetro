@@ -50,9 +50,9 @@
 
 #define DESC_CTRL     0x000F06FE
 #define DESC_CTRL_ALT 0x003FFFFF
-#define DESC_VMU_MEMORY      0x7E7E3F40
+#define DESC_VMU_TIMER       0x7E7E3F40
 #define DESC_VMU_SCREEN      0x00051000
-#define DESC_VMU_TIMER      0x000F4100
+#define DESC_VMU_MEMORY      0x000F4100
 #define DESC_RUMBLE   0x01010000
 #define DESC_MOUSE    0x000E0700
 #define DESC_KB       0x01020080
@@ -617,10 +617,10 @@ maple_end:
                             case CMD_INFO_REQ:
                                 pkt.len = 28;
                                 pkt.cmd = CMD_INFO_RSP;
-                                pkt.data32[0] = ID_VMU_MEM | ID_VMU_LCD | ID_VMU_CLK;
+                                pkt.data32[0] = ID_VMU_MEM;
                                 pkt.data32[1] = DESC_VMU_MEMORY;
-                                pkt.data32[2] = DESC_VMU_SCREEN;
-                                pkt.data32[3] = DESC_VMU_TIMER;
+                                pkt.data32[2] = 0;
+                                pkt.data32[3] = 0;
                                 memcpy((void *)&pkt.data32[4], vmu_area_dir_name, sizeof(vmu_area_dir_name));
                                 memcpy((void *)&pkt.data32[12], brand, sizeof(brand));
                                 pkt.data32[27] = PWR_VMU;

@@ -108,7 +108,7 @@ static int32_t create_vmu_file(void) {
         //Seek to block FE
         fseek(file, (512*0xFE), SEEK_SET);
         //Write block FE
-        const uint8_t[4] fat_unallocated = {0xff, 0xfc, 0xff, 0xfc};
+        const uint8_t fat_unallocated[4] = {0xff, 0xfc, 0xff, 0xfc};
         for (uint32_t i = 0; i < 120; i++) {
             data_count = fwrite(fat_unallocated, 4, 1, file); // I'm not 100% confident the endianness on this will work like I expect. TODO: Check this.
         }

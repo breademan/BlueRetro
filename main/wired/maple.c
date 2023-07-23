@@ -73,7 +73,7 @@
 #define old_wait_100ns() asm("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n"); 
 #define wait_100ns() asm("movi a8, 5\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
 #define wait_500ns() asm("movi a8, 49\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
-
+#define wait_200ns() asm("movi a8, 16\n\tloop a8, waitend%=\n\tnop\n\twaitend%=:\n":::"a8");
 #define maple_fix_byte(s, a, b) (s ? ((a << s) | (b >> (8 - s))) : b)
 
 struct maple_pkt {
@@ -216,14 +216,12 @@ static void maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t *d
     GPIO.out_w1tc = maple1;
     wait_500ns();
     GPIO.out_w1ts = maple1;
-    wait_100ns();
-    wait_100ns();
+    wait_200ns();
 
     for (uint32_t bit = 0; bit < len*8; ++data) {
         for (uint32_t mask = 0x80; mask; mask >>= 1, ++bit) {
             GPIO.out_w1ts = maple0;
-            wait_100ns();
-            wait_100ns();
+            wait_200ns();
             if (*data & mask) {
                 GPIO.out_w1ts = maple1;
             }
@@ -232,13 +230,11 @@ static void maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t *d
             }
             wait_100ns();
             GPIO.out_w1tc = maple0;
-            wait_100ns();
-            wait_100ns();
+            wait_200ns();
             mask >>= 1;
             ++bit;
             GPIO.out_w1ts = maple1;
-            wait_100ns();
-            wait_100ns();
+            wait_200ns();
             if (*data & mask) {
                 GPIO.out_w1ts = maple0;
             }
@@ -247,8 +243,7 @@ static void maple_tx(uint32_t port, uint32_t maple0, uint32_t maple1, uint8_t *d
             }
             wait_100ns();
             GPIO.out_w1tc = maple1;
-            wait_100ns();
-            wait_100ns();
+            wait_200ns();
         }
         *crc ^= *data;
     }
@@ -600,7 +595,7 @@ maple_end:
                                 if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
                                     phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                    //data might be written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
+                                    //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
                                     //but if we read data back in the same order it should be OK until I make an unscramble function.
                                     mc_write((block_no*512)+(128*phase),(void *) &pkt.data32[2],128);
                                 }

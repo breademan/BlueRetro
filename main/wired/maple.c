@@ -581,7 +581,6 @@ maple_end:
                                 pkt.len = 0x82;
                                 pkt.cmd = CMD_DATA_TX;
                                 pkt.data32[0] = ID_VMU_MEM;
-                                //pkt.data32[1] // This should be the same as what the host sent, though this also applies for [0].
                                 phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                 if(phase) {ets_printf("Block Read with unexpected phase: 0x%02X, expected 0\n", phase);}
                                 block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
@@ -595,8 +594,7 @@ maple_end:
                                 if ((!bad_frame) && pkt.data32[0]==ID_VMU_MEM) {
                                     phase = (uint8_t) ((pkt.data32[1] >> 16) & 0x00FF);
                                     block_no = (uint8_t) ((pkt.data32[1]) & 0x00FF);
-                                    //data is written to the VMU scrambled in wire order; this should make compatability with other devices wrong,
-                                    //but if we read data back in the same order it should be OK until I make an unscramble function.
+                                    // Data is written to the VMU in wire byte order. If creating a read/write function, this must be accounted for
                                     mc_write((block_no*512)+(128*phase),(void *) &pkt.data32[2],128);
                                 }
                                 maple_tx(port, maple0, maple1, pkt.data, pkt.len * 4 + 5);

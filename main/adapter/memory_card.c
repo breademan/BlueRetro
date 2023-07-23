@@ -13,6 +13,7 @@
 #include "sdkconfig.h"
 #include "system/fs.h"
 #include "memory_card.h"
+#include "system/delay.h"
 
 #define MC_BUFFER_SIZE (128 * 1024)
 #define MC_BUFFER_BLOCK_SIZE (4 * 1024)
@@ -219,8 +220,10 @@ int32_t mc_init(void) {
 
     esp_timer_create(&mc_timer_args, &mc_timer_hdl);
     
-    while(wired_adapter.system_id==WIRED_AUTO)
-    ;
+    while(wired_adapter.system_id==WIRED_AUTO){
+        printf("Waiting for wired_adapter.system_id to be decided\n");
+        delay_us(200);
+    }
 
     if (wired_adapter.system_id==DC) mc_filename = DC_MEMORY_CARD_FILE;
     else mc_filename = N64_MEMORY_CARD_FILE;

@@ -219,6 +219,9 @@ int32_t mc_init(void) {
 
     esp_timer_create(&mc_timer_args, &mc_timer_hdl);
     
+    while(wired_adapter.system_id==WIRED_AUTO)
+    ;
+
     if (wired_adapter.system_id==DC) mc_filename = DC_MEMORY_CARD_FILE;
     else mc_filename = N64_MEMORY_CARD_FILE;
 
